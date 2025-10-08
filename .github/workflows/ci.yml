@@ -10,7 +10,7 @@ on:
         type: number
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: flutter-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
