@@ -2,6 +2,14 @@
 
 This GitHub Action analyzes code coverage from an lcov.info file and automatically comments on pull requests with per-file coverage details when the overall coverage is below a specified threshold.
 
+## ✅ **Action Structure**
+
+This is now a proper **composite action** with the recommended folder structure:
+1. **`.github/actions/coverage-comment/action.yml`** - Defines the action metadata, inputs, and outputs
+2. **Composite action** - Uses `runs.using: composite` to run multiple steps
+3. **Step-level usage** - Can be used directly as a step in any workflow
+4. **Organized structure** - Follows GitHub Actions best practices for action organization
+
 ## Features
 
 - 📊 Parses lcov.info files to extract coverage data
@@ -17,21 +25,23 @@ This GitHub Action analyzes code coverage from an lcov.info file and automatical
 
 ```yaml
 - name: Comment Coverage Analysis
-  uses: ./.github/workflows/coverage-comment.yml
+  uses: ./.github/actions/coverage-comment
   with:
     coverage_file: coverage/lcov.info
     min_coverage_threshold: 80
+    github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### Advanced Usage
 
 ```yaml
 - name: Comment Coverage Analysis
-  uses: ./.github/workflows/coverage-comment.yml
+  uses: ./.github/actions/coverage-comment
   with:
     coverage_file: "custom/path/to/coverage.info"
     min_coverage_threshold: 85
     comment_header: "custom-coverage-analysis"
+    github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ## Inputs
@@ -41,6 +51,7 @@ This GitHub Action analyzes code coverage from an lcov.info file and automatical
 | `coverage_file` | Path to the lcov.info coverage file | No | `coverage/lcov.info` |
 | `min_coverage_threshold` | Minimum coverage percentage threshold | No | `80` |
 | `comment_header` | Header used for the sticky PR comment | No | `coverage-analysis` |
+| `github_token` | GitHub token for PR comments | Yes | - |
 
 ## Output
 
@@ -85,6 +96,14 @@ The overall coverage is below the 80% threshold.
 ## Integration with Existing Workflows
 
 This action is designed to work alongside existing coverage reporting tools. It's already integrated into the main CI workflow and will run automatically on pull requests.
+
+## Action Structure
+
+The action is structured as a **composite action** that:
+1. **Runs as a single step** in any workflow
+2. **Contains multiple sub-steps** for parsing, commenting, and cleanup
+3. **Provides outputs** for overall coverage and threshold status
+4. **Handles all logic internally** without requiring separate jobs
 
 ## Requirements
 
