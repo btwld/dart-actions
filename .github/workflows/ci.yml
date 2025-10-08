@@ -8,6 +8,11 @@ on:
         required: false
         default: 80
         type: number
+      test_paths:
+        description: "List of paths to test with flutter test (comma-separated)"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: flutter-ci-${{ github.ref }}
@@ -48,7 +53,18 @@ jobs:
         shell: bash
 
       - name: Run root tests
-        run: flutter test --no-pub --coverage
+        run: |
+          if [ -n "${{ inputs.test_paths }}" ]; then
+            echo "Running tests on specified paths: ${{ inputs.test_paths }}"
+            IFS=',' read -ra PATHS <<< "${{ inputs.test_paths }}"
+            for path in "${PATHS[@]}"; do
+              echo "Testing path: $path"
+              flutter test --no-pub --coverage "$path"
+            done
+          else
+            echo "Running all tests"
+            flutter test --no-pub --coverage
+          fi
 
       - name: Setup LCOV
         uses: hrishikesh-kadam/setup-lcov@v1
