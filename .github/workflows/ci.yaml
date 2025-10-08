@@ -1,0 +1,68 @@
+name: Flutter CI
+
+on:
+  workflow_call:
+    inputs:
+      min_coverage:
+        description: "Minimum code coverage percentage required"
+        required: false
+        default: 80
+        type: number
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run Flutter Tests
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install root dependencies
+        run: flutter pub get
+
+      - name: Analyze root project
+        run: flutter analyze
+
+      - name: Install DCM
+        uses: CQLabs/setup-dcm@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run DCM
+        run: dcm analyze .
+        shell: bash
+
+      - name: Run root tests
+        run: flutter test --coverage
+
+      - name: Setup LCOV
+        uses: hrishikesh-kadam/setup-lcov@v1
+        with:
+          ref: v2.3
+
+      - name: Report Code Coverage
+        uses: zgosalvez/github-actions-report-lcov@v4
+        continue-on-error: true
+        with:
+          coverage-files: coverage/lcov.info
+          minimum-coverage: ${{ inputs.min_coverage }}
+          artifact-name: code-coverage-report
+          github-token: ${{ secrets.GITHUB_TOKEN }}
