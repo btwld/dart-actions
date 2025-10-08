@@ -55,11 +55,9 @@ jobs:
         with:
           ref: v2.3
 
-      - name: Report Code Coverage
-        uses: zgosalvez/github-actions-report-lcov@v4
-        continue-on-error: true
+      - name: Comment Coverage Analysis
+        if: github.event_name == 'pull_request'
+        uses: ./.github/workflows/coverage-comment.yml
         with:
-          coverage-files: coverage/lcov.info
-          minimum-coverage: ${{ inputs.min_coverage }}
-          artifact-name: code-coverage-report
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          coverage_file: coverage/lcov.info
+          min_coverage_threshold: ${{ inputs.min_coverage }}
