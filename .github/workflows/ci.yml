@@ -48,7 +48,7 @@ jobs:
         shell: bash
 
       - name: Run root tests
-        run: flutter test --coverage
+        run: flutter test --no-pub --coverage
 
       - name: Setup LCOV
         uses: hrishikesh-kadam/setup-lcov@v1

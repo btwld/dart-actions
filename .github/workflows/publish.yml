@@ -1,0 +1,57 @@
+name: Publish to pub.dev
+
+on:
+  workflow_call:
+    inputs:
+      flutter_channel:
+        description: "Flutter channel to use (e.g. stable, beta)"
+        required: false
+        default: stable
+        type: string
+      dry_run:
+        description: "Whether to only perform a dry run (true/false)"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: publish-to-pub-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish to pub.dev
+    environment: Production
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Dart (provision OIDC)
+        uses: dart-lang/setup-dart@v1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter_channel }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze project
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Publish - dry run
+        if: ${{ inputs.dry_run == true }}
+        run: dart pub publish --dry-run
+
+      - name: Publish to pub.dev (OIDC)
+        if: ${{ inputs.dry_run == false }}
+        run: dart pub publish --force
