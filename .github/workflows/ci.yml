@@ -57,7 +57,7 @@ jobs:
 
       - name: Comment Coverage Analysis
         if: github.event_name == 'pull_request'
-        uses: ./.github/actions/coverage-comment
+        uses: btwld/dart-actions/.github/actions/coverage-comment
         with:
           coverage_file: coverage/lcov.info
           min_coverage_threshold: ${{ inputs.min_coverage }}
