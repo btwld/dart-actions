@@ -8,8 +8,8 @@ on:
         required: false
         default: 80
         type: number
-      test_paths:
-        description: "List of paths to test with flutter test (comma-separated)"
+      project_paths:
+        description: "List of project paths to run dependencies and tests (comma-separated)"
         required: false
         default: ""
         type: string
@@ -37,8 +37,19 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install root dependencies
-        run: flutter pub get
+      - name: Install dependencies
+        run: |
+          if [ -n "${{ inputs.project_paths }}" ]; then
+            echo "Installing dependencies for specified project paths: ${{ inputs.project_paths }}"
+            IFS=',' read -ra PATHS <<< "${{ inputs.project_paths }}"
+            for path in "${PATHS[@]}"; do
+              echo "Installing dependencies for project path: $path"
+              cd "$path" && flutter pub get && cd - > /dev/null
+            done
+          else
+            echo "Installing root dependencies"
+            flutter pub get
+          fi
 
       - name: Analyze root project
         run: flutter analyze
@@ -54,11 +65,11 @@ jobs:
 
       - name: Run root tests
         run: |
-          if [ -n "${{ inputs.test_paths }}" ]; then
-            echo "Running tests on specified paths: ${{ inputs.test_paths }}"
-            IFS=',' read -ra PATHS <<< "${{ inputs.test_paths }}"
+          if [ -n "${{ inputs.project_paths }}" ]; then
+            echo "Running tests on specified project paths: ${{ inputs.project_paths }}"
+            IFS=',' read -ra PATHS <<< "${{ inputs.project_paths }}"
             for path in "${PATHS[@]}"; do
-              echo "Testing path: $path"
+              echo "Testing project path: $path"
               flutter test --no-pub --coverage "$path"
             done
           else
