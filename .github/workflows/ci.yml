@@ -22,9 +22,22 @@ jobs:
   setup:
     name: Setup Flutter
     runs-on: ubuntu-latest
+    outputs:
+      project_paths_json: ${{ steps.set_project_paths.outputs.project_paths_json }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set project paths
+        id: set_project_paths
+        run: |
+          PROJECT_PATHS="${{ inputs.project_paths }}"
+          if [ -z "$PROJECT_PATHS" ]; then
+            PROJECT_PATHS="."
+          fi
+          # Convert comma-separated string to JSON array
+          PROJECT_PATHS_JSON=$(echo "$PROJECT_PATHS" | awk -v RS=',' -v ORS=',' '{print "\"" $0 "\""}' | sed 's/,$//')
+          echo "project_paths_json=[$PROJECT_PATHS_JSON]" >> "$GITHUB_OUTPUT"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -51,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project_path: ${{ fromJson(inputs.project_paths != '' && format('["{0}"]', join(split(inputs.project_paths, ','), '","')) || '["."]') }}
+        project_path: ${{ fromJson(needs.setup.outputs.project_paths_json) }}
 
     steps:
       - name: Checkout repository
