@@ -1,0 +1,362 @@
+name: Dart Actions
+
+on:
+  workflow_call:
+    inputs:
+      # CI inputs
+      min_coverage:
+        description: "Minimum code coverage percentage required"
+        required: false
+        default: 80
+        type: number
+      project_paths:
+        description: "List of project paths to run dependencies and tests (comma-separated)"
+        required: false
+        default: ""
+        type: string
+      
+      # PR Title Check inputs
+      comment_header:
+        description: "Header used for the sticky PR comment"
+        required: false
+        default: pr-title-lint-error
+        type: string
+      comment_message:
+        description: "Message shown when PR title is invalid"
+        required: false
+        default: |
+          Hey there and thank you for opening this pull request! 👋🏼
+
+          We require pull request titles to follow the [Conventional Commits specification](https://www.conventionalcommits.org/en/v1.0.0/)
+          and it looks like your proposed title needs to be adjusted.
+
+          Details:
+
+          ```
+          ${{ steps.lint_pr_title.outputs.error_message }}
+          ```
+        type: string
+      
+      # Publish inputs
+      flutter_channel:
+        description: "Flutter channel to use (e.g. stable, beta)"
+        required: false
+        default: stable
+        type: string
+      dry_run:
+        description: "Whether to only perform a dry run (true/false)"
+        required: false
+        default: true
+        type: boolean
+      publish_path:
+        description: "Project path to publish (empty for root)"
+        required: false
+        default: "."
+        type: string
+      
+      # Workflow mode selection
+      workflow_mode:
+        description: "Which workflow to run: ci, pr-check, publish, or all"
+        required: false
+        default: "all"
+        type: string
+
+concurrency:
+  group: dart-actions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # PR Title Check Job
+  pr-title-check:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    if: ${{ inputs.workflow_mode == 'pr-check' || inputs.workflow_mode == 'all' }}
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5.5.3
+        id: lint_pr_title
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add PR comment for invalid title
+        if: always() && (steps.lint_pr_title.outputs.error_message != null)
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: ${{ inputs.comment_header }}
+          message: ${{ inputs.comment_message }}
+
+      - name: Remove comment if title is fixed
+        if: ${{ steps.lint_pr_title.outputs.error_message == null }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: ${{ inputs.comment_header }}
+          delete: true
+
+  # Setup Job for CI and Publish
+  setup:
+    name: Setup Flutter
+    runs-on: ubuntu-latest
+    if: ${{ inputs.workflow_mode == 'ci' || inputs.workflow_mode == 'publish' || inputs.workflow_mode == 'all' }}
+    outputs:
+      project_paths_json: ${{ steps.set_project_paths.outputs.project_paths_json }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set project paths
+        id: set_project_paths
+        run: |
+          PROJECT_PATHS="${{ inputs.project_paths }}"
+          if [ -z "$PROJECT_PATHS" ]; then
+            PROJECT_PATHS="."
+          fi
+          # Convert comma-separated string to JSON array using jq
+          PROJECT_PATHS_JSON=$(echo "$PROJECT_PATHS" | jq -R -s -c 'split(",")')
+          echo "project_paths_json=$PROJECT_PATHS_JSON" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter_channel }}
+          cache: true
+
+      - name: Install DCM
+        if: ${{ inputs.workflow_mode == 'ci' || inputs.workflow_mode == 'all' }}
+        uses: CQLabs/setup-dcm@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup LCOV
+        if: ${{ inputs.workflow_mode == 'ci' || inputs.workflow_mode == 'all' }}
+        uses: hrishikesh-kadam/setup-lcov@v1
+        with:
+          ref: v2.3
+
+      - name: Set up Dart (provision OIDC)
+        if: ${{ inputs.workflow_mode == 'publish' || inputs.workflow_mode == 'all' }}
+        uses: dart-lang/setup-dart@v1
+
+  # CI Test Job
+  test:
+    name: Run Flutter Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    if: ${{ inputs.workflow_mode == 'ci' || inputs.workflow_mode == 'all' }}
+    permissions:
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        project_path: ${{ fromJson(needs.setup.outputs.project_paths_json) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter_channel }}
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          echo "Installing dependencies for project path: ${{ matrix.project_path }}"
+          cd "${{ matrix.project_path }}" && flutter pub get
+
+      - name: Analyze project
+        run: |
+          echo "Analyzing project path: ${{ matrix.project_path }}"
+          flutter analyze "${{ matrix.project_path }}"
+
+      - name: Run DCM
+        run: dcm analyze "${{ matrix.project_path }}"
+        shell: bash
+
+      - name: Run tests
+        run: |
+          echo "Running tests for project path: ${{ matrix.project_path }}"
+          flutter test --no-pub --coverage "${{ matrix.project_path }}"
+
+      - name: Analyze Coverage
+        run: |
+          echo "📊 Analyzing code coverage for ${{ matrix.project_path }}..."
+
+          COVERAGE_FILE="${{ matrix.project_path }}/coverage/lcov.info"
+          if [ ! -f "$COVERAGE_FILE" ]; then
+            echo "❌ Coverage file not found at $COVERAGE_FILE"
+            exit 1
+          fi
+
+          # Parse lcov file and calculate coverage
+          python3 << 'EOF'
+          import re
+          import sys
+          import os
+
+          project_path = os.environ.get("PROJECT_PATH", ".")
+          lcov_file = os.path.join(project_path, "coverage", "lcov.info")
+          min_coverage = float(os.environ.get('MIN_COVERAGE', '80'))
+
+          # Define dynamic status thresholds
+          # 🟢: >= min_coverage
+          # 🟡: >= (min_coverage * 0.625) and < min_coverage
+          # 🔴: < (min_coverage * 0.625)
+          yellow_threshold = min_coverage * 0.625
+
+          def parse_lcov_file(file_path):
+              coverage_data = {}
+              total_lines = 0
+              total_hit = 0
+
+              try:
+                  with open(file_path, 'r') as f:
+                      content = f.read()
+              except FileNotFoundError:
+                  print(f"❌ Coverage file not found: {file_path}")
+                  sys.exit(1)
+              except Exception as e:
+                  print(f"❌ Error reading coverage file: {e}")
+                  sys.exit(1)
+
+              file_sections = re.split(r'^SF:', content, flags=re.MULTILINE)
+
+              for section in file_sections[1:]:
+                  lines = section.strip().split('\n')
+                  if not lines:
+                      continue
+
+                  file_path = lines[0].strip()
+                  if not file_path:
+                      continue
+
+                  hit_lines = 0
+                  total_file_lines = 0
+
+                  for line in lines:
+                      if line.startswith('DA:'):
+                          parts = line[3:].split(',')
+                          if len(parts) == 2:
+                              _, hit_count = parts
+                              total_file_lines += 1
+                              if int(hit_count) > 0:
+                                  hit_lines += 1
+
+                  if total_file_lines > 0:
+                      coverage_percentage = (hit_lines / total_file_lines) * 100
+                      coverage_data[file_path] = {
+                          'hit': hit_lines,
+                          'total': total_file_lines,
+                          'percentage': coverage_percentage
+                      }
+                      total_hit += hit_lines
+                      total_lines += total_file_lines
+
+              return coverage_data, total_hit, total_lines
+
+          def get_coverage_status(percentage):
+              if percentage >= min_coverage:
+                  return "🟢"
+              elif percentage >= yellow_threshold:
+                  return "🟡"
+              else:
+                  return "🔴"
+
+          coverage_data, total_hit, total_lines = parse_lcov_file(lcov_file)
+
+          if total_lines == 0:
+              print("❌ No coverage data found in lcov.info file")
+              sys.exit(1)
+
+          overall_coverage = (total_hit / total_lines) * 100
+
+          print(f"\n📊 Code Coverage Analysis for {project_path}")
+          print(f"{'='*50}")
+          print(f"Overall Coverage: {overall_coverage:.1f}% {get_coverage_status(overall_coverage)}")
+          print(f"Total Lines: {total_hit}/{total_lines}")
+          print(f"Minimum Required: {min_coverage}%")
+
+          if overall_coverage < min_coverage:
+              print(f"\n❌ Coverage {overall_coverage:.1f}% is below minimum required {min_coverage}%")
+              coverage_status = "FAILED"
+          else:
+              print(f"\n✅ Coverage {overall_coverage:.1f}% meets minimum requirement {min_coverage}%")
+              coverage_status = "PASSED"
+
+          print(f"\n📋 Per-File Coverage Details")
+          print(f"{'='*50}")
+          print(f"{'File':<50} {'Coverage':<10} {'Lines Hit/Total':<15} {'Status'}")
+          print(f"{'-'*50} {'-'*10} {'-'*15} {'-'*6}")
+
+          sorted_files = sorted(coverage_data.items(), key=lambda x: x[1]['percentage'])
+
+          for file_path, data in sorted_files:
+              display_path = file_path
+              if len(display_path) > 47:
+                  display_path = "..." + display_path[-44:]
+              status = get_coverage_status(data['percentage'])
+              print(f"{display_path:<50} {data['percentage']:>6.1f}% {data['hit']:>3}/{data['total']:<3} {status}")
+
+          print(f"\n📈 Coverage Legend:")
+          print(f"🟢 {min_coverage:.1f}%+ coverage")
+          print(f"🟡 {yellow_threshold:.1f}% - {min_coverage-0.1:.1f}% coverage")
+          print(f"🔴 <{yellow_threshold:.1f}% coverage")
+
+          if coverage_status == "FAILED":
+              sys.exit(1)
+          EOF
+        env:
+          MIN_COVERAGE: ${{ inputs.min_coverage }}
+          PROJECT_PATH: ${{ matrix.project_path }}
+
+  # Publish Job
+  publish:
+    name: Publish to pub.dev
+    environment: Production
+    runs-on: ubuntu-latest
+    needs: setup
+    if: ${{ inputs.workflow_mode == 'publish' || inputs.workflow_mode == 'all' }}
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ inputs.flutter_channel }}
+          cache: true
+
+      - name: Set up Dart (provision OIDC)
+        uses: dart-lang/setup-dart@v1
+
+      - name: Install dependencies
+        run: |
+          echo "Installing dependencies for project path: ${{ inputs.publish_path }}"
+          cd "${{ inputs.publish_path }}" && flutter pub get
+
+      - name: Analyze project
+        run: |
+          echo "Analyzing project path: ${{ inputs.publish_path }}"
+          flutter analyze "${{ inputs.publish_path }}"
+
+      - name: Run tests
+        run: |
+          echo "Running tests for project path: ${{ inputs.publish_path }}"
+          flutter test "${{ inputs.publish_path }}"
+
+      - name: Publish - dry run
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "Dry run publishing for project path: ${{ inputs.publish_path }}"
+          cd "${{ inputs.publish_path }}" && dart pub publish --dry-run
+
+      - name: Publish to pub.dev (OIDC)
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          echo "Publishing to pub.dev for project path: ${{ inputs.publish_path }}"
+          cd "${{ inputs.publish_path }}" && dart pub publish --force
