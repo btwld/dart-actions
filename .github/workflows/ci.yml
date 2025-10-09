@@ -35,9 +35,9 @@ jobs:
           if [ -z "$PROJECT_PATHS" ]; then
             PROJECT_PATHS="."
           fi
-          # Convert comma-separated string to JSON array
-          PROJECT_PATHS_JSON=$(echo "$PROJECT_PATHS" | awk -v RS=',' -v ORS=',' '{print "\"" $0 "\""}' | sed 's/,$//')
-          echo "project_paths_json=[$PROJECT_PATHS_JSON]" >> "$GITHUB_OUTPUT"
+          # Convert comma-separated string to JSON array using jq
+          PROJECT_PATHS_JSON=$(echo "$PROJECT_PATHS" | jq -R -s -c 'split(",")')
+          echo "project_paths_json=$PROJECT_PATHS_JSON" >> "$GITHUB_OUTPUT"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
