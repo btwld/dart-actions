@@ -13,6 +13,11 @@ on:
         required: false
         default: true
         type: boolean
+      project_paths:
+        description: "Comma-separated list of project paths to publish (empty for root)"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: publish-to-pub-${{ github.ref }}
@@ -25,6 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+    strategy:
+      matrix:
+        project_path: ${{ fromJson(inputs.project_paths != '' && format('["{0}"]', join(split(inputs.project_paths, ','), '","')) || '["."]') }}
 
     steps:
       - name: Checkout repository
@@ -40,18 +48,28 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: |
+          echo "Installing dependencies for project path: ${{ matrix.project_path }}"
+          cd "${{ matrix.project_path }}" && flutter pub get
 
       - name: Analyze project
-        run: flutter analyze
+        run: |
+          echo "Analyzing project path: ${{ matrix.project_path }}"
+          flutter analyze "${{ matrix.project_path }}"
 
       - name: Run tests
-        run: flutter test
+        run: |
+          echo "Running tests for project path: ${{ matrix.project_path }}"
+          flutter test "${{ matrix.project_path }}"
 
       - name: Publish - dry run
         if: ${{ inputs.dry_run == true }}
-        run: dart pub publish --dry-run
+        run: |
+          echo "Dry run publishing for project path: ${{ matrix.project_path }}"
+          cd "${{ matrix.project_path }}" && dart pub publish --dry-run
 
       - name: Publish to pub.dev (OIDC)
         if: ${{ inputs.dry_run == false }}
-        run: dart pub publish --force
+        run: |
+          echo "Publishing to pub.dev for project path: ${{ matrix.project_path }}"
+          cd "${{ matrix.project_path }}" && dart pub publish --force

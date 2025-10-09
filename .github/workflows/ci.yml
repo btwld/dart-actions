@@ -26,6 +26,8 @@ jobs:
       pull-requests: write
     strategy:
       fail-fast: false
+      matrix:
+        project_path: ${{ fromJson(inputs.project_paths != '' && format('["{0}"]', join(split(inputs.project_paths, ','), '","')) || '["."]') }}
 
     steps:
       - name: Checkout repository
@@ -39,20 +41,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ -n "${{ inputs.project_paths }}" ]; then
-            echo "Installing dependencies for specified project paths: ${{ inputs.project_paths }}"
-            IFS=',' read -ra PATHS <<< "${{ inputs.project_paths }}"
-            for path in "${PATHS[@]}"; do
-              echo "Installing dependencies for project path: $path"
-              cd "$path" && flutter pub get && cd - > /dev/null
-            done
-          else
-            echo "Installing root dependencies"
-            flutter pub get
-          fi
+          echo "Installing dependencies for project path: ${{ matrix.project_path }}"
+          cd "${{ matrix.project_path }}" && flutter pub get
 
-      - name: Analyze root project
-        run: flutter analyze
+      - name: Analyze project
+        run: |
+          echo "Analyzing project path: ${{ matrix.project_path }}"
+          flutter analyze "${{ matrix.project_path }}"
 
       - name: Install DCM
         uses: CQLabs/setup-dcm@v2
@@ -60,22 +55,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run DCM
-        run: dcm analyze .
+        run: dcm analyze "${{ matrix.project_path }}"
         shell: bash
 
-      - name: Run root tests
+      - name: Run tests
         run: |
-          if [ -n "${{ inputs.project_paths }}" ]; then
-            echo "Running tests on specified project paths: ${{ inputs.project_paths }}"
-            IFS=',' read -ra PATHS <<< "${{ inputs.project_paths }}"
-            for path in "${PATHS[@]}"; do
-              echo "Testing project path: $path"
-              flutter test --no-pub --coverage "$path"
-            done
-          else
-            echo "Running all tests"
-            flutter test --no-pub --coverage
-          fi
+          echo "Running tests for project path: ${{ matrix.project_path }}"
+          flutter test --no-pub --coverage "${{ matrix.project_path }}"
 
       - name: Setup LCOV
         uses: hrishikesh-kadam/setup-lcov@v1
@@ -84,25 +70,35 @@ jobs:
 
       - name: Analyze Coverage
         run: |
-          echo "📊 Analyzing code coverage..."
-          
-          if [ ! -f "coverage/lcov.info" ]; then
-            echo "❌ Coverage file not found at coverage/lcov.info"
+          echo "📊 Analyzing code coverage for ${{ matrix.project_path }}..."
+
+          COVERAGE_FILE="${{ matrix.project_path }}/coverage/lcov.info"
+          if [ ! -f "$COVERAGE_FILE" ]; then
+            echo "❌ Coverage file not found at $COVERAGE_FILE"
             exit 1
           fi
-          
+
           # Parse lcov file and calculate coverage
           python3 << 'EOF'
           import re
           import sys
-          from pathlib import Path
-          
+          import os
+
+          project_path = os.environ.get("PROJECT_PATH", ".")
+          lcov_file = os.path.join(project_path, "coverage", "lcov.info")
+          min_coverage = float(os.environ.get('MIN_COVERAGE', '80'))
+
+          # Define dynamic status thresholds
+          # 🟢: >= min_coverage
+          # 🟡: >= (min_coverage * 0.625) and < min_coverage
+          # 🔴: < (min_coverage * 0.625)
+          yellow_threshold = min_coverage * 0.625
+
           def parse_lcov_file(file_path):
-              """Parse lcov.info file and return coverage data"""
               coverage_data = {}
               total_lines = 0
               total_hit = 0
-              
+
               try:
                   with open(file_path, 'r') as f:
                       content = f.read()
@@ -112,33 +108,30 @@ jobs:
               except Exception as e:
                   print(f"❌ Error reading coverage file: {e}")
                   sys.exit(1)
-              
-              # Split into file sections
+
               file_sections = re.split(r'^SF:', content, flags=re.MULTILINE)
-              
-              for section in file_sections[1:]:  # Skip first empty section
+
+              for section in file_sections[1:]:
                   lines = section.strip().split('\n')
                   if not lines:
                       continue
-                      
+
                   file_path = lines[0].strip()
                   if not file_path:
                       continue
-                  
-                  # Extract line coverage data
+
                   hit_lines = 0
                   total_file_lines = 0
-                  
+
                   for line in lines:
                       if line.startswith('DA:'):
-                          # Format: DA:line_number,hit_count
                           parts = line[3:].split(',')
                           if len(parts) == 2:
-                              line_num, hit_count = parts
+                              _, hit_count = parts
                               total_file_lines += 1
                               if int(hit_count) > 0:
                                   hit_lines += 1
-                  
+
                   if total_file_lines > 0:
                       coverage_percentage = (hit_lines / total_file_lines) * 100
                       coverage_data[file_path] = {
@@ -148,75 +141,60 @@ jobs:
                       }
                       total_hit += hit_lines
                       total_lines += total_file_lines
-              
+
               return coverage_data, total_hit, total_lines
-          
+
           def get_coverage_status(percentage):
-              """Get status emoji based on coverage percentage"""
-              if percentage >= 80:
+              if percentage >= min_coverage:
                   return "🟢"
-              elif percentage >= 50:
+              elif percentage >= yellow_threshold:
                   return "🟡"
               else:
                   return "🔴"
-          
-          # Parse coverage data
-          coverage_data, total_hit, total_lines = parse_lcov_file('coverage/lcov.info')
-          
+
+          coverage_data, total_hit, total_lines = parse_lcov_file(lcov_file)
+
           if total_lines == 0:
               print("❌ No coverage data found in lcov.info file")
               sys.exit(1)
-          
-          # Calculate overall coverage
+
           overall_coverage = (total_hit / total_lines) * 100
-          
-          # Get minimum coverage from environment variable
-          import os
-          min_coverage = float(os.environ.get('MIN_COVERAGE', '80'))
-          
-          # Print header
-          print(f"\n📊 Code Coverage Analysis")
+
+          print(f"\n📊 Code Coverage Analysis for {project_path}")
           print(f"{'='*50}")
           print(f"Overall Coverage: {overall_coverage:.1f}% {get_coverage_status(overall_coverage)}")
           print(f"Total Lines: {total_hit}/{total_lines}")
           print(f"Minimum Required: {min_coverage}%")
-          
-          # Check if coverage meets minimum requirement
+
           if overall_coverage < min_coverage:
               print(f"\n❌ Coverage {overall_coverage:.1f}% is below minimum required {min_coverage}%")
               coverage_status = "FAILED"
           else:
               print(f"\n✅ Coverage {overall_coverage:.1f}% meets minimum requirement {min_coverage}%")
               coverage_status = "PASSED"
-          
-          # Print per-file coverage
+
           print(f"\n📋 Per-File Coverage Details")
           print(f"{'='*50}")
           print(f"{'File':<50} {'Coverage':<10} {'Lines Hit/Total':<15} {'Status'}")
           print(f"{'-'*50} {'-'*10} {'-'*15} {'-'*6}")
-          
-          # Sort files by coverage percentage (lowest first)
+
           sorted_files = sorted(coverage_data.items(), key=lambda x: x[1]['percentage'])
-          
+
           for file_path, data in sorted_files:
-              # Truncate long file paths for display
               display_path = file_path
               if len(display_path) > 47:
                   display_path = "..." + display_path[-44:]
-              
               status = get_coverage_status(data['percentage'])
               print(f"{display_path:<50} {data['percentage']:>6.1f}% {data['hit']:>3}/{data['total']:<3} {status}")
-          
+
           print(f"\n📈 Coverage Legend:")
-          print(f"🟢 80%+ coverage")
-          print(f"🟡 50-79% coverage")
-          print(f"🔴 <50% coverage")
-          
-          # Exit with error code if coverage is below minimum
+          print(f"🟢 {min_coverage:.1f}%+ coverage")
+          print(f"🟡 {yellow_threshold:.1f}% - {min_coverage-0.1:.1f}% coverage")
+          print(f"🔴 <{yellow_threshold:.1f}% coverage")
+
           if coverage_status == "FAILED":
               sys.exit(1)
           EOF
         env:
           MIN_COVERAGE: ${{ inputs.min_coverage }}
-
-      
+          PROJECT_PATH: ${{ matrix.project_path }}
