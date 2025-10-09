@@ -19,9 +19,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup:
+    name: Setup Flutter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install DCM
+        uses: CQLabs/setup-dcm@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup LCOV
+        uses: hrishikesh-kadam/setup-lcov@v1
+        with:
+          ref: v2.3
+
   test:
     name: Run Flutter Tests
     runs-on: ubuntu-latest
+    needs: setup
     permissions:
       pull-requests: write
     strategy:
@@ -49,11 +73,6 @@ jobs:
           echo "Analyzing project path: ${{ matrix.project_path }}"
           flutter analyze "${{ matrix.project_path }}"
 
-      - name: Install DCM
-        uses: CQLabs/setup-dcm@v2
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Run DCM
         run: dcm analyze "${{ matrix.project_path }}"
         shell: bash
@@ -62,11 +81,6 @@ jobs:
         run: |
           echo "Running tests for project path: ${{ matrix.project_path }}"
           flutter test --no-pub --coverage "${{ matrix.project_path }}"
-
-      - name: Setup LCOV
-        uses: hrishikesh-kadam/setup-lcov@v1
-        with:
-          ref: v2.3
 
       - name: Analyze Coverage
         run: |

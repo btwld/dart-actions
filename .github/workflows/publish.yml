@@ -13,10 +13,10 @@ on:
         required: false
         default: true
         type: boolean
-      project_paths:
-        description: "Comma-separated list of project paths to publish (empty for root)"
+      path:
+        description: "Project path to publish (empty for root)"
         required: false
-        default: ""
+        default: "."
         type: string
 
 concurrency:
@@ -30,9 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-    strategy:
-      matrix:
-        project_path: ${{ fromJson(inputs.project_paths != '' && format('["{0}"]', join(split(inputs.project_paths, ','), '","')) || '["."]') }}
 
     steps:
       - name: Checkout repository
@@ -49,27 +46,27 @@ jobs:
 
       - name: Install dependencies
         run: |
-          echo "Installing dependencies for project path: ${{ matrix.project_path }}"
-          cd "${{ matrix.project_path }}" && flutter pub get
+          echo "Installing dependencies for project path: ${{ inputs.path }}"
+          cd "${{ inputs.path }}" && flutter pub get
 
       - name: Analyze project
         run: |
-          echo "Analyzing project path: ${{ matrix.project_path }}"
-          flutter analyze "${{ matrix.project_path }}"
+          echo "Analyzing project path: ${{ inputs.path }}"
+          flutter analyze "${{ inputs.path }}"
 
       - name: Run tests
         run: |
-          echo "Running tests for project path: ${{ matrix.project_path }}"
-          flutter test "${{ matrix.project_path }}"
+          echo "Running tests for project path: ${{ inputs.path }}"
+          flutter test "${{ inputs.path }}"
 
       - name: Publish - dry run
         if: ${{ inputs.dry_run == true }}
         run: |
-          echo "Dry run publishing for project path: ${{ matrix.project_path }}"
-          cd "${{ matrix.project_path }}" && dart pub publish --dry-run
+          echo "Dry run publishing for project path: ${{ inputs.path }}"
+          cd "${{ inputs.path }}" && dart pub publish --dry-run
 
       - name: Publish to pub.dev (OIDC)
         if: ${{ inputs.dry_run == false }}
         run: |
-          echo "Publishing to pub.dev for project path: ${{ matrix.project_path }}"
-          cd "${{ matrix.project_path }}" && dart pub publish --force
+          echo "Publishing to pub.dev for project path: ${{ inputs.path }}"
+          cd "${{ inputs.path }}" && dart pub publish --force
