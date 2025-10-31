@@ -3,33 +3,43 @@ name: Publish to pub.dev
 on:
   workflow_call:
     inputs:
-      flutter_channel:
-        description: "Flutter channel to use (e.g. stable, beta)"
-        required: false
-        default: stable
+      packages_folder_path:
+        description: 'Path to the packages folder'
+        required: true
         type: string
-      dry_run:
-        description: "Whether to only perform a dry run (true/false)"
-        required: false
-        default: true
-        type: boolean
-      path:
-        description: "Project path to publish (empty for root)"
-        required: false
-        default: "."
+      packages:
+        description: 'List of packages to publish (one per line)'
+        required: true
         type: string
 
 concurrency:
-  group: publish-to-pub-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    name: Prepare package list
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Convert packages to JSON array
+        id: set-matrix
+        run: |
+          packages=$(echo "${{ inputs.packages }}" | grep -v '^$' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "matrix=$packages" >> $GITHUB_OUTPUT
+
   publish:
-    name: Publish to pub.dev
+    name: Publish ${{ matrix.package }} to pub.dev
+    needs: prepare
     environment: Production
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+    strategy:
+      matrix:
+        package: ${{ fromJson(needs.prepare.outputs.matrix) }}
+      fail-fast: false
 
     steps:
       - name: Checkout repository
@@ -41,32 +51,26 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ inputs.flutter_channel }}
+          channel: 'stable'
+          flutter-version: 3.35.0
           cache: true
 
-      - name: Install dependencies
-        run: |
-          echo "Installing dependencies for project path: ${{ inputs.path }}"
-          cd "${{ inputs.path }}" && flutter pub get
+      - name: Install dependencies for ${{ matrix.package }}
+        working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
+        run: flutter pub get
 
-      - name: Analyze project
-        run: |
-          echo "Analyzing project path: ${{ inputs.path }}"
-          flutter analyze "${{ inputs.path }}"
+      - name: Analyze ${{ matrix.package }}
+        working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
+        run: flutter analyze
 
-      - name: Run tests
-        run: |
-          echo "Running tests for project path: ${{ inputs.path }}"
-          flutter test "${{ inputs.path }}"
+      - name: Run tests for ${{ matrix.package }}
+        working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
+        run: flutter test
 
-      - name: Publish - dry run
-        if: ${{ inputs.dry_run == true }}
-        run: |
-          echo "Dry run publishing for project path: ${{ inputs.path }}"
-          cd "${{ inputs.path }}" && dart pub publish --dry-run
+      - name: Publish ${{ matrix.package }} - dry run
+        working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
+        run: dart pub publish --dry-run
 
-      - name: Publish to pub.dev (OIDC)
-        if: ${{ inputs.dry_run == false }}
-        run: |
-          echo "Publishing to pub.dev for project path: ${{ inputs.path }}"
-          cd "${{ inputs.path }}" && dart pub publish --force
+      - name: Publish ${{ matrix.package }} to pub.dev (OIDC)
+        working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
+        run: dart pub publish --force
