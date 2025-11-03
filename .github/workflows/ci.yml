@@ -76,6 +76,5 @@ jobs:
 
       - name: Run Test
         run: |
-          melos run test:flutter
-          melos run test:dart
+          melos run test:ci
         shell: bash
