@@ -59,11 +59,6 @@ jobs:
         shell: bash
         run: melos bootstrap
 
-      - name: Run melos commands
-        if: ${{ inputs.melos-commands != '' }}
-        shell: bash    
-        run: ${{ inputs.melos-commands }}
-
       - uses: invertase/github-action-dart-analyzer@v1
         with:
           fatal-infos: false
@@ -74,10 +69,10 @@ jobs:
         with:
           github-token: ${{ secrets.token }}
 
-      # Lint
-      - name: analyze
-        run: melos run --no-select analyze
-        shell: bash
+      - name: Run melos commands
+        if: ${{ inputs.melos-commands != '' }}
+        shell: bash    
+        run: ${{ inputs.melos-commands }}
 
       - name: Run Test
         run: |
