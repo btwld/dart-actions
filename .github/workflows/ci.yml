@@ -76,5 +76,5 @@ jobs:
 
       - name: Run Test
         run: |
-          melos run test:ci
+          melos run ci
         shell: bash
