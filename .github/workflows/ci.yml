@@ -23,10 +23,6 @@ on:
         description: 'Github token'
         required: true
 
-concurrency:
-  group: ci-workflow-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   test:
     name: Run tests for all packages
