@@ -52,16 +52,33 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: 3.38.1
           cache: true
 
       - name: Install dependencies for ${{ matrix.package }}
         working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
-        run: flutter pub get
+        run: |
+          if grep -q "sdk: flutter" pubspec.yaml; then
+            echo "Installing Flutter dependencies..."
+            flutter pub get
+          else
+            echo "Installing Dart dependencies..."
+            dart pub get
+          fi
 
       - name: Run tests for ${{ matrix.package }}
         working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
-        run: flutter test
+        run: |
+          if [ -d "test" ]; then
+            if grep -q "sdk: flutter" pubspec.yaml; then
+              echo "Running Flutter tests..."
+              flutter test
+            else
+              echo "Running Dart tests..."
+              dart test
+            fi
+          else
+            echo "No test folder found, skipping tests."
+          fi
 
       - name: Publish ${{ matrix.package }} - dry run
         working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
