@@ -52,6 +52,8 @@ jobs:
 
       - name: Setup Melos
         uses: bluefireteam/melos-action@v3
+        with:
+          run-bootstrap: false
 
       - name: Get dependencies
         shell: bash
