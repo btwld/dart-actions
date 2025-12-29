@@ -46,18 +46,12 @@ jobs:
           fvm use ${{ inputs.flutter-version }} --force
           echo "$HOME/fvm/versions/${{ inputs.flutter-version }}/bin" >> $GITHUB_PATH
 
-      - name: Flutter version
+      - name: Flutter Doctor
         shell: bash
-        run: flutter --version
+        run: flutter --doctor
 
       - name: Setup Melos
         uses: bluefireteam/melos-action@v3
-        with:
-          run-bootstrap: false
-
-      - name: Get dependencies
-        shell: bash
-        run: melos bootstrap
 
       - uses: invertase/github-action-dart-analyzer@v1
         with:
