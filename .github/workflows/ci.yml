@@ -48,7 +48,7 @@ jobs:
 
       - name: Flutter Doctor
         shell: bash
-        run: flutter --doctor
+        run: flutter doctor
 
       - name: Setup Melos
         uses: bluefireteam/melos-action@v3
