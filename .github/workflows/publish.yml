@@ -80,6 +80,24 @@ jobs:
             echo "No test folder found, skipping tests."
           fi
 
+      - name: Restore checked-in files for ${{ matrix.package }}
+        working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
+        run: |
+          # `flutter pub get` runs Flutter's AnalysisOptionsMigration, which
+          # rewrites analysis_options.yaml whenever the platform excludes are
+          # absent. `dart pub publish` then refuses to publish from a dirty
+          # tree and exits 65, after every gate has already passed. Publish
+          # the committed tree, not whatever dependency resolution or the
+          # test run left behind.
+          modified=$(git diff --name-only -- .)
+          if [ -n "$modified" ]; then
+            echo "::warning::Build steps modified checked-in files; restoring them before publish. Files: $(echo "$modified" | tr '\n' ' ')"
+            echo "$modified"
+            git checkout -- .
+          else
+            echo "Working tree is clean."
+          fi
+
       - name: Publish ${{ matrix.package }} - dry run
         working-directory: ${{ inputs.packages_folder_path }}/${{ matrix.package }}
         run: dart pub publish --dry-run
