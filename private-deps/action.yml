@@ -1,0 +1,74 @@
+name: Private btwld dependencies
+description: >-
+  Mint a short-lived, read-only GitHub App token for named private btwld
+  repositories and let git (and so `pub get`) fetch them over HTTPS.
+inputs:
+  app-id:
+    description: ID of the btwld CI GitHub App (org variable `CI_APP_ID`).
+    required: true
+  private-key:
+    description: Private key of the btwld CI GitHub App (org secret `CI_APP_PRIVATE_KEY`).
+    required: true
+  repositories:
+    description: >-
+      Private btwld repositories to read, by name, separated by commas or
+      newlines (for example `glitch`). The token covers only these.
+    required: true
+  owner:
+    description: Organization that owns the repositories.
+    required: false
+    default: btwld
+outputs:
+  token:
+    description: The read-only installation token. It is revoked when the job ends.
+    value: ${{ steps.token.outputs.token }}
+runs:
+  using: composite
+  steps:
+    - name: Check inputs
+      shell: bash
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+        REPOSITORIES: ${{ inputs.repositories }}
+      run: |
+        set -euo pipefail
+        missing=()
+        [[ -n "$APP_ID" ]] || missing+=('app-id (org variable CI_APP_ID)')
+        [[ -n "$PRIVATE_KEY" ]] || missing+=('private-key (org secret CI_APP_PRIVATE_KEY)')
+        [[ -n "${REPOSITORIES//[[:space:],]/}" ]] || missing+=('repositories')
+        if (( ${#missing[@]} )); then
+          printf '::error::Missing input: %s\n' "${missing[@]}"
+          echo 'Secrets are not passed to pull requests from forks; those runs cannot read private repositories.' >&2
+          exit 1
+        fi
+
+    - name: Create token
+      id: token
+      uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ inputs.owner }}
+        repositories: ${{ inputs.repositories }}
+        permission-contents: read
+
+    - name: Configure git
+      shell: bash
+      env:
+        TOKEN: ${{ steps.token.outputs.token }}
+        OWNER: ${{ inputs.owner }}
+        REPOSITORIES: ${{ inputs.repositories }}
+      run: |
+        set -euo pipefail
+        authorization=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\r\n')
+        echo "::add-mask::$authorization"
+        # Scope the header to each named repository, with and without `.git`,
+        # because git matches these keys on whole path segments.
+        for repo in ${REPOSITORIES//,/ }; do
+          for url in "https://github.com/$OWNER/$repo" "https://github.com/$OWNER/$repo.git"; do
+            git config --global --unset-all "http.$url.extraheader" || true
+            git config --global "http.$url.extraheader" "AUTHORIZATION: basic $authorization"
+          done
+          echo "Configured read access to $OWNER/$repo"
+        done

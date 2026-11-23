@@ -8,6 +8,7 @@ A collection of reusable GitHub Actions workflows for Dart and Flutter projects.
   - [CI Workflow](#ci-workflow)
   - [PR Title Check Workflow](#pr-title-check-workflow)
   - [Publish Workflow](#publish-workflow)
+  - [Private Dependencies Action](#private-dependencies-action)
 - [Quick Start](#quick-start)
 - [Detailed Usage](#detailed-usage)
 
@@ -216,6 +217,25 @@ For each package:
 - Your repository must be set up for [OIDC publishing](https://dart.dev/tools/pub/automated-publishing)
 - The workflow requires `id-token: write` permission (already configured)
 - A "Production" environment should be configured in your repository settings
+
+---
+
+### Private Dependencies Action
+
+**Path:** `private-deps/action.yml`
+
+Lets CI fetch private btwld repositories (for example a `git:` dependency in
+`pubspec.yaml`) with a short-lived, read-only GitHub App token. See
+[private-deps/README.md](private-deps/README.md).
+
+```yaml
+- name: Read private dependencies
+  uses: btwld/dart-actions/private-deps@main
+  with:
+    app-id: ${{ vars.CI_APP_ID }}
+    private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+    repositories: glitch
+```
 
 ---
 
