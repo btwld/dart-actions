@@ -35,11 +35,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install DCM
-        uses: CQLabs/setup-dcm@v2
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Setup LCOV
         uses: hrishikesh-kadam/setup-lcov@v1
         with:
@@ -54,10 +49,6 @@ jobs:
         run: |
           echo "Analyzing project path: ${{ inputs.path }}"
           flutter analyze "${{ inputs.path }}"
-
-      - name: Run DCM
-        run: dcm analyze "${{ inputs.path }}"
-        shell: bash
 
       - name: Run tests
         run: |

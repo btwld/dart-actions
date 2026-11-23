@@ -25,7 +25,6 @@ A comprehensive continuous integration workflow for Dart/Flutter projects using 
 
 - ✅ Multi-package testing with Melos
 - 🔍 Static code analysis with Dart Analyzer
-- 🎯 Optional DCM (Dart Code Metrics) integration
 - 🚀 Customizable Melos commands
 - ⚡ Concurrent execution with auto-cancellation
 - 📦 FVM (Flutter Version Management) support
@@ -47,7 +46,6 @@ jobs:
       token: ${{ secrets.GITHUB_TOKEN }}
     with:
       flutter-version: "stable"
-      run-dcm: true
       melos-commands: |
         melos run format:check
         melos run build_runner
@@ -58,14 +56,13 @@ jobs:
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `flutter-version` | Flutter version to use (e.g., "stable", "3.19.0") | No | `"stable"` |
-| `run-dcm` | Whether to run DCM analysis | No | `true` |
 | `melos-commands` | Custom Melos commands to run (one per line) | No | `""` |
 
 #### Secrets
 
 | Secret | Description | Required |
 |--------|-------------|----------|
-| `token` | GitHub token for authentication (used for DCM) | Yes |
+| `token` | GitHub token. Optional and unused; accepted so existing callers keep working | No |
 
 #### What It Does
 
@@ -75,8 +72,7 @@ jobs:
 4. **Bootstrap** - Runs `melos bootstrap` to install dependencies
 5. **Custom Commands** - Executes any custom Melos commands you specify
 6. **Analysis** - Runs Dart analyzer on all packages
-7. **DCM** - Runs Dart Code Metrics (if enabled)
-8. **Testing** - Runs all Flutter and Dart tests
+7. **Testing** - Runs all Flutter and Dart tests
 
 ---
 
@@ -331,18 +327,6 @@ jobs:
       melos-commands: |
         melos run build_runner
         melos run format:check
-```
-
-#### Without DCM
-
-```yaml
-jobs:
-  ci:
-    uses: btwld/dart-actions/.github/workflows/ci.yml@main
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
-    with:
-      run-dcm: false
 ```
 
 ### Publish Workflow Examples
