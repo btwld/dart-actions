@@ -45,6 +45,11 @@ The org admin does this once:
   cannot read private repositories. The action fails with a clear message.
 - Give the secret only to private consumer repositories. A public repository
   that holds it exposes private code to anyone who can change its workflows.
-- The token is revoked when the job ends. The git header stays in the global
-  config until then; a job that later runs untrusted code can remove it with
-  `git config --global --unset-all http.https://github.com/btwld/<repo>.git.extraheader`.
+- The token is revoked when the job ends. The git headers stay in the global
+  config until then. A job that later runs untrusted code should first remove
+  both headers for each repository:
+
+  ```bash
+  git config --global --unset-all http.https://github.com/btwld/<repo>.extraheader || true
+  git config --global --unset-all http.https://github.com/btwld/<repo>.git.extraheader || true
+  ```
