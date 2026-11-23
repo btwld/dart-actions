@@ -1,0 +1,200 @@
+name: Publish release (v2)
+
+# Publishes the packages that a release tag names, in dependency order.
+#
+# The caller starts this workflow from a tag push: pub.dev accepts automated
+# uploads only from a workflow that a tag push started. Each package's pub.dev
+# Admin page must allow this repository with the same tag pattern as
+# .github/release.yaml, and should require the `environment` below.
+#
+# Jobs:
+#   plan     checks the tag, versions, changelogs and branch. No credential.
+#   verify   analyzes and tests the packages and runs pre_publish. No credential.
+#   approve  waits for a reviewer when `approval_environment` is set.
+#   publish  for each package: skip if published, check hosted resolution,
+#            dry run, then upload with a short-lived OIDC credential.
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Path of the release configuration in the caller repository.
+        required: false
+        type: string
+        default: .github/release.yaml
+      environment:
+        description: >-
+          GitHub environment for the upload job. Match the "Require GitHub
+          Actions environment" setting on pub.dev.
+        required: false
+        type: string
+        default: pub.dev
+      approval_environment:
+        description: >-
+          Optional GitHub environment with required reviewers. When set, one
+          approval gates the whole release. Leave empty to publish without a
+          manual gate.
+        required: false
+        type: string
+        default: ''
+      tool_ref:
+        description: >-
+          Ref of btwld/dart-actions for the release tool. Use the same ref as
+          the `uses:` line that calls this workflow.
+        required: false
+        type: string
+        default: v2
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Check the release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+      sdk: ${{ steps.plan.outputs.sdk }}
+      flutter_version: ${{ steps.plan.outputs.flutter_version }}
+      flutter_version_file: ${{ steps.plan.outputs.flutter_version_file }}
+    steps:
+      # Full history: the tag must be reachable from a release branch.
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the release tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: btwld/dart-actions
+          ref: ${{ inputs.tool_ref }}
+          path: .dart-actions
+          persist-credentials: false
+
+      - name: Set up the release tool
+        uses: ./.dart-actions/actions/setup-sdk
+        with:
+          sdk: dart
+
+      - name: Plan the release
+        id: plan
+        env:
+          CONFIG: ${{ inputs.config }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" != tag ]; then
+            echo "::error::Start this workflow from a tag push. pub.dev rejects other events."
+            exit 1
+          fi
+          dart run .dart-actions/tool/bin/release.dart plan \
+            --root=src --config="$CONFIG" --tag="$TAG" --commit="$COMMIT"
+
+  verify:
+    name: Analyze and test
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+
+      - name: Check out the release tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: btwld/dart-actions
+          ref: ${{ inputs.tool_ref }}
+          path: .dart-actions
+          persist-credentials: false
+
+      - name: Set up the SDK
+        uses: ./.dart-actions/actions/setup-sdk
+        with:
+          sdk: ${{ needs.plan.outputs.sdk }}
+          flutter-version: ${{ needs.plan.outputs.flutter_version }}
+          flutter-version-file: ${{ needs.plan.outputs.flutter_version_file != '' && format('src/{0}', needs.plan.outputs.flutter_version_file) || '' }}
+
+      - name: Analyze, test and run pre_publish
+        env:
+          CONFIG: ${{ inputs.config }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          dart run .dart-actions/tool/bin/release.dart verify \
+            --root=src --config="$CONFIG" --tag="$TAG"
+
+  approve:
+    name: Approve the release
+    needs: verify
+    if: inputs.approval_environment != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ inputs.approval_environment }}
+    permissions: {}
+    steps:
+      - name: Record the approval
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "Approved publishing $TAG to pub.dev."
+
+  publish:
+    name: Publish to pub.dev
+    needs: [plan, verify, approve]
+    # Runs after an approval, or when no approval environment is set.
+    if: >-
+      always() &&
+      needs.plan.result == 'success' &&
+      needs.verify.result == 'success' &&
+      (needs.approve.result == 'success' || needs.approve.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    concurrency:
+      # Never cancel an upload that has started.
+      group: release-publish-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+
+      - name: Check out the release tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: btwld/dart-actions
+          ref: ${{ inputs.tool_ref }}
+          path: .dart-actions
+          persist-credentials: false
+
+      - name: Set up the SDK
+        uses: ./.dart-actions/actions/setup-sdk
+        with:
+          sdk: ${{ needs.plan.outputs.sdk }}
+          flutter-version: ${{ needs.plan.outputs.flutter_version }}
+          flutter-version-file: ${{ needs.plan.outputs.flutter_version_file != '' && format('src/{0}', needs.plan.outputs.flutter_version_file) || '' }}
+
+      # The tool strips the OIDC request variables from every validation
+      # command, and adds a pub.dev credential only around each upload.
+      - name: Publish in dependency order
+        env:
+          CONFIG: ${{ inputs.config }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          dart run .dart-actions/tool/bin/release.dart publish \
+            --root=src --config="$CONFIG" --tag="$TAG"

@@ -2,6 +2,20 @@
 
 A collection of reusable GitHub Actions workflows for Dart and Flutter projects. These workflows are designed to streamline CI/CD processes, enforce code quality standards, and automate publishing to pub.dev.
 
+## Release workflows (v2)
+
+v2 automates the whole release: versions, changelogs, tags, GitHub releases,
+and ordered, re-runnable pub.dev uploads, configured by one
+`.github/release.yaml` per repository. Read [docs/RELEASE_V2.md](docs/RELEASE_V2.md).
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| `release-pr.yml` | manual dispatch | Writes versions and changelogs, opens the release PR |
+| `release-tag.yml` | push to `main` | Tags new versions and creates GitHub releases |
+| `release-publish.yml` | tag push | Checks, tests, and publishes in dependency order |
+
+The v1 workflows below stay available unchanged.
+
 ## 📋 Table of Contents
 
 - [Available Workflows](#available-workflows)

@@ -1,0 +1,16 @@
+name: dart_actions_release
+description: Release tool behind the btwld/dart-actions v2 release workflows.
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  path: ^1.9.0
+  pub_semver: ^2.1.4
+  yaml: ^3.1.2
+  yaml_edit: ^2.2.1
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

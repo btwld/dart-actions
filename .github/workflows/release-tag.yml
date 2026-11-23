@@ -1,0 +1,98 @@
+name: Tag release (v2)
+
+# Creates the release tags that the pubspec versions on the default branch
+# need, one push per tag, plus a GitHub release with the changelog section.
+# Each tag push then starts the caller's publish job.
+#
+# A package gets a tag only when its tag does not exist yet, its changelog
+# has a section for the version, and the version is not on pub.dev yet. So
+# this is safe to run on every push to the default branch, and adopting it
+# does not tag old releases.
+#
+# A tag pushed with GITHUB_TOKEN starts no workflow, so tags need a GitHub App
+# token (`app_client_id` input and `app_private_key` secret). The App needs Contents: write
+# and must be allowed to push tags by the repository's tag rulesets.
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Path of the release configuration in the caller repository.
+        required: false
+        type: string
+        default: .github/release.yaml
+      github_release:
+        description: Create a GitHub release for each tag.
+        required: false
+        type: boolean
+        default: true
+      tool_ref:
+        description: Ref of btwld/dart-actions for the release tool.
+        required: false
+        type: string
+        default: v2
+      app_client_id:
+        description: >-
+          Client ID of the GitHub App that pushes tags. It is not a
+          secret; an organization variable such as RELEASE_APP_CLIENT_ID works.
+        required: true
+        type: string
+    secrets:
+      app_private_key:
+        description: Private key of that GitHub App.
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release-tag-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Create release tags
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Create a GitHub App token
+        id: app
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ inputs.app_client_id }}
+          private-key: ${{ secrets.app_private_key }}
+
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+
+      - name: Check out the release tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: btwld/dart-actions
+          ref: ${{ inputs.tool_ref }}
+          path: .dart-actions
+          persist-credentials: false
+
+      - name: Set up the release tool
+        uses: ./.dart-actions/actions/setup-sdk
+        with:
+          sdk: dart
+
+      - name: Create and push the tags
+        working-directory: src
+        env:
+          CONFIG: ${{ inputs.config }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GITHUB_RELEASE: ${{ inputs.github_release }}
+        run: |
+          set -euo pipefail
+          git config user.name 'btwld-release[bot]'
+          git config user.email 'btwld-release[bot]@users.noreply.github.com'
+          args=(tag --push --root=. --config="$CONFIG")
+          if [ "$GITHUB_RELEASE" != true ]; then args+=(--no-release); fi
+          dart run ../.dart-actions/tool/bin/release.dart "${args[@]}"
