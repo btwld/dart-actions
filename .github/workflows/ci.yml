@@ -8,11 +8,6 @@ on:
         required: false
         default: "stable"
         type: string
-      run-dcm:
-        description: 'Should run DCM'
-        required: false
-        default: true
-        type: boolean
       melos-commands:
         description: 'List of melos commands to run (one per line)'
         required: false
@@ -20,8 +15,8 @@ on:
         type: string
     secrets:
       token:
-        description: 'Github token'
-        required: true
+        description: 'GitHub token. Kept so existing callers that pass it keep working; the workflow does not use it.'
+        required: false
 
 jobs:
   test:
@@ -56,12 +51,6 @@ jobs:
       - uses: invertase/github-action-dart-analyzer@v1
         with:
           fatal-infos: false
-
-      - name: Install DCM
-        if: ${{ inputs.run-dcm }}
-        uses: CQLabs/setup-dcm@v2
-        with:
-          github-token: ${{ secrets.token }}
 
       - name: Run melos commands
         if: ${{ inputs.melos-commands != '' }}
