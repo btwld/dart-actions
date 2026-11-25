@@ -304,7 +304,8 @@ Future<void> _checkHostedResolution(
       );
     }
 
-    // pub.dev may need a moment to serve a sibling that was just published.
+    // pub.dev can list a new sibling version before its package index
+    // serves it to pub get, so retry for up to 10 minutes.
     for (var attempt = 1; ; attempt++) {
       final result = await run(
         package.executable,
@@ -313,7 +314,7 @@ Future<void> _checkHostedResolution(
         allowFailure: true,
       );
       if (result.exitCode == 0) break;
-      if (attempt == 5) {
+      if (attempt == 20) {
         throw ReleaseException([
           '${package.name} does not resolve against pub.dev outside the '
               'workspace.',

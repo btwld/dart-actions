@@ -188,9 +188,16 @@ void main() {
         );
         // a comes first: b depends on it. c has no section, d is published.
         expect(tags.map((tag) => tag.tag), ['a-v1.1.0', 'b-v1.0.0']);
-        expect(tags.first.notes, '## a\n\n- New.');
+        expect(
+          releaseNotes(
+            load(),
+            TagPlan('a-v1.1.0', '1.1.0', tags.first.packages),
+            root: repo.root,
+          ),
+          '## a\n\n- New.',
+        );
 
-        await pushTags(tags, root: repo.root, createReleases: false);
+        await pushTags(tags, root: repo.root);
         final remote = repo.git(['ls-remote', '--tags', 'origin']);
         expect(remote, contains('refs/tags/a-v1.1.0'));
         expect(remote, contains('refs/tags/b-v1.0.0'));
@@ -206,4 +213,25 @@ void main() {
       },
     );
   });
+
+  test(
+    'announceRelease waits for pub.dev before it creates a release',
+    () async {
+      repo.write('.github/release.yaml', 'packages:\n  - path: .\n');
+      repo.write('pubspec.yaml', pubspec('a', '1.0.0'));
+      repo.write('CHANGELOG.md', '## 1.0.0\n\n- First.\n');
+      final config = load();
+
+      await expectLater(
+        announceRelease(
+          config,
+          TagPlan('v1.0.0', '1.0.0', config.packages),
+          root: repo.root,
+          waitForVersion: (package, version) async =>
+              throw StateError('pub.dev does not list $package $version yet.'),
+        ),
+        throwsA(isA<ReleaseException>()),
+      );
+    },
+  );
 }

@@ -23,7 +23,9 @@ Commands:
           [--packages=a,b] Limit an explicit version to some packages.
           [--summary=<f>]  Write the release PR body to a file.
   tag [--push]             List the tags HEAD needs; with --push, create
-      [--no-release]       and push them and create GitHub releases.
+                           and push them, one push per tag.
+  release --tag=<tag>      Create the GitHub release once pub.dev serves
+                           every package of the tag.
 
 Global options:
   --root=<dir>             Repository root. Defaults to the current directory.
@@ -132,13 +134,15 @@ Future<void> main(List<String> arguments) async {
             '${flags.contains('push') ? 'Tagging' : 'Needs'} ${tag.tag}',
           );
         }
-        if (flags.contains('push')) {
-          await pushTags(
-            tags,
-            root: root,
-            createReleases: !flags.contains('no-release'),
-          );
-        }
+        if (flags.contains('push')) await pushTags(tags, root: root);
+      case 'release':
+        final plan = await planTag(
+          config,
+          _required(options, 'tag'),
+          root: root,
+          checkAncestry: false,
+        );
+        await announceRelease(config, plan, root: root);
       default:
         stdout.write(_usage);
         exitCode = 64;

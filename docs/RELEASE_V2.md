@@ -15,8 +15,7 @@ The v1 `publish.yml` stays unchanged for the repositories that use it.
 2. **Review and merge.** The maintainer edits the changelog in the PR if
    needed and merges it.
 3. **Tag.** On the push to `main`, `release-tag.yml` creates a tag for each
-   new version, one push per tag, plus a GitHub release with the changelog
-   section.
+   new version, one push per tag.
 4. **Publish.** Each tag push starts `release-publish.yml`:
    - **plan** checks that the tag matches a package tag pattern, that each
      pubspec declares the tagged version, that each changelog documents it,
@@ -30,7 +29,11 @@ The v1 `publish.yml` stays unchanged for the repositories that use it.
      consumer would. It restores files that the build changed, runs
      `pub publish --dry-run` (warnings fail the release), and only then
      requests a short-lived OIDC credential, uploads, and removes the
-     credential.
+     credential. A dependent package waits up to 10 minutes for pub.dev to
+     serve a sibling that was just uploaded;
+   - **release** creates the GitHub release with the changelog section, but
+     only after pub.dev serves every package of the tag. Set
+     `github_release: false` to skip it.
 
 Steps 1 and 2 are optional. A maintainer can also raise the version and
 changelog in an ordinary PR; step 3 tags it after the merge.
@@ -127,7 +130,7 @@ jobs:
     if: github.ref_type == 'tag'
     uses: btwld/dart-actions/.github/workflows/release-publish.yml@v2
     permissions:
-      contents: read
+      contents: write # the GitHub release after the upload
       id-token: write
     with:
       approval_environment: Release

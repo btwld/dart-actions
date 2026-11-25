@@ -33,12 +33,12 @@ Future<bool> isVersionPublished(
 }
 
 /// Waits until pub.dev serves [package] [version], so a dependent package
-/// can resolve it.
+/// can resolve it. The defaults wait up to 10 minutes.
 Future<void> waitUntilPublished(
   String package,
   String version, {
   Duration interval = const Duration(seconds: 15),
-  int attempts = 20,
+  int attempts = 40,
   Uri? server,
 }) async {
   for (var attempt = 1; attempt <= attempts; attempt++) {

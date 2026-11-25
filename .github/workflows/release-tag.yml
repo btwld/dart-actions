@@ -1,8 +1,8 @@
 name: Tag release (v2)
 
 # Creates the release tags that the pubspec versions on the default branch
-# need, one push per tag, plus a GitHub release with the changelog section.
-# Each tag push then starts the caller's publish job.
+# need, one push per tag. Each tag push then starts the caller's publish job,
+# which creates the GitHub release after pub.dev serves the new version.
 #
 # A package gets a tag only when its tag does not exist yet, its changelog
 # has a section for the version, and the version is not on pub.dev yet. So
@@ -21,11 +21,6 @@ on:
         required: false
         type: string
         default: .github/release.yaml
-      github_release:
-        description: Create a GitHub release for each tag.
-        required: false
-        type: boolean
-        default: true
       tool_ref:
         description: Ref of btwld/dart-actions for the release tool.
         required: false
@@ -87,12 +82,9 @@ jobs:
         working-directory: src
         env:
           CONFIG: ${{ inputs.config }}
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          GITHUB_RELEASE: ${{ inputs.github_release }}
         run: |
           set -euo pipefail
           git config user.name 'btwld-release[bot]'
           git config user.email 'btwld-release[bot]@users.noreply.github.com'
-          args=(tag --push --root=. --config="$CONFIG")
-          if [ "$GITHUB_RELEASE" != true ]; then args+=(--no-release); fi
-          dart run ../.dart-actions/tool/bin/release.dart "${args[@]}"
+          dart run ../.dart-actions/tool/bin/release.dart tag --push \
+            --root=. --config="$CONFIG"

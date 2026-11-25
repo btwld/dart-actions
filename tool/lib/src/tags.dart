@@ -8,23 +8,46 @@ import 'github.dart';
 import 'process.dart';
 import 'pub_dev.dart';
 import 'pubspec.dart';
+import 'release.dart';
 import 'versioning.dart';
 
 /// A release tag that the current commit still needs.
 class PendingTag {
-  PendingTag(this.tag, this.version, this.packages, this.notes);
+  PendingTag(this.tag, this.version, this.packages);
 
   final String tag;
   final String version;
   final List<PackageConfig> packages;
 
-  /// The GitHub release notes, built from the changelog sections.
-  final String notes;
+  String get title => releaseTitle(packages, version);
+}
 
-  bool get preRelease => isPreRelease(version);
+/// The name of the release of [packages] at [version].
+String releaseTitle(List<PackageConfig> packages, String version) =>
+    packages.length == 1 ? '${packages.single.name} $version' : version;
 
-  String get title =>
-      packages.length == 1 ? '${packages.single.name} $version' : version;
+/// The GitHub release notes for [plan], built from the changelog sections.
+String releaseNotes(
+  ReleaseConfig config,
+  TagPlan plan, {
+  required String root,
+}) => [
+  for (final package in plan.packages)
+    if (_changelogSection(package, plan.version, root: root)
+        case final section?)
+      config.packages.length == 1 ? section : '## ${package.name}\n\n$section',
+].join('\n\n');
+
+String? _changelogSection(
+  PackageConfig package,
+  String version, {
+  required String root,
+}) {
+  final changelog = File(p.join(root, package.path, 'CHANGELOG.md'));
+
+  return changelog.existsSync()
+      ? sectionFor(changelog.readAsStringSync(), version)
+      : null;
 }
 
 /// Lists the tags that the pubspec versions at HEAD need.
@@ -49,11 +72,7 @@ Future<List<PendingTag>> pendingTags(
           )
           .toSet();
 
-  final byTag =
-      <
-        String,
-        ({String version, List<PackageConfig> packages, List<String> notes})
-      >{};
+  final byTag = <String, ({String version, List<PackageConfig> packages})>{};
   for (final package in config.packages) {
     final directory = p.join(root, package.path);
     final version = readPubspecVersion(
@@ -62,11 +81,7 @@ Future<List<PendingTag>> pendingTags(
     final tag = package.tagFor(version);
     if (remoteTags.contains(tag)) continue;
 
-    final changelog = File(p.join(directory, 'CHANGELOG.md'));
-    final section = changelog.existsSync()
-        ? sectionFor(changelog.readAsStringSync(), version)
-        : null;
-    if (section == null) {
+    if (_changelogSection(package, version, root: root) == null) {
       warning(
         '${package.name} $version has no changelog section, so it gets no tag.',
       );
@@ -79,34 +94,26 @@ Future<List<PendingTag>> pendingTags(
       continue;
     }
 
-    final entry = byTag.putIfAbsent(
-      tag,
-      () => (version: version, packages: [], notes: []),
-    );
-    entry.packages.add(package);
-    entry.notes.add(
-      config.packages.length == 1 ? section : '## ${package.name}\n\n$section',
-    );
+    byTag
+        .putIfAbsent(tag, () => (version: version, packages: []))
+        .packages
+        .add(package);
   }
 
   return [
     for (final MapEntry(key: tag, value: entry) in byTag.entries)
-      PendingTag(tag, entry.version, entry.packages, entry.notes.join('\n\n')),
+      PendingTag(tag, entry.version, entry.packages),
   ];
 }
 
-/// Creates and pushes [tags] one at a time, then creates a GitHub release
-/// for each.
+/// Creates and pushes [tags] one at a time.
 ///
 /// GitHub starts no workflows when one push carries more than three tags, so
 /// each tag gets its own push. The push must use a GitHub App token: a tag
 /// pushed with the default `GITHUB_TOKEN` starts no workflow, and the publish
-/// workflow would never run.
-Future<void> pushTags(
-  List<PendingTag> tags, {
-  required String root,
-  bool createReleases = true,
-}) async {
+/// workflow would never run. The publish workflow creates the GitHub release
+/// after the upload, so no release announces a version pub.dev lacks.
+Future<void> pushTags(List<PendingTag> tags, {required String root}) async {
   final commit = await git(['rev-parse', 'HEAD'], workingDirectory: root);
   for (final tag in tags) {
     await run('git', [
@@ -122,31 +129,67 @@ Future<void> pushTags(
       'origin',
       'refs/tags/${tag.tag}',
     ], workingDirectory: root);
-
-    if (!createReleases) continue;
-    final notes = File(
-      p.join(Directory.systemTemp.path, 'release_notes_${tag.tag}.md'),
-    )..writeAsStringSync(tag.notes);
-    await run(
-      'gh',
-      [
-        'release',
-        'create',
-        tag.tag,
-        '--verify-tag',
-        '--title',
-        tag.title,
-        '--notes-file',
-        notes.path,
-        if (tag.preRelease) '--prerelease',
-      ],
-      workingDirectory: root,
-      credentialed: true,
-    );
   }
   addSummary(
     tags.isEmpty
         ? 'No new release tags.'
         : '### Release tags\n\n${tags.map((tag) => '- `${tag.tag}`').join('\n')}',
   );
+}
+
+/// Creates the GitHub release for [plan] once pub.dev serves every package.
+///
+/// Does nothing when the release already exists, so a re-run is safe.
+/// [waitForVersion] lets tests avoid the network.
+Future<void> announceRelease(
+  ReleaseConfig config,
+  TagPlan plan, {
+  required String root,
+  Future<void> Function(String package, String version)? waitForVersion,
+}) async {
+  final wait = waitForVersion ?? waitUntilPublished;
+  for (final package in plan.packages) {
+    try {
+      await wait(package.name, plan.version);
+    } on StateError catch (error) {
+      throw ReleaseException([
+        '${error.message} The GitHub release waits until pub.dev serves '
+            'every package of the tag.',
+      ]);
+    }
+  }
+
+  final existing = await run(
+    'gh',
+    ['release', 'view', plan.tag, '--json', 'tagName'],
+    workingDirectory: root,
+    credentialed: true,
+    echo: false,
+    allowFailure: true,
+  );
+  if (existing.exitCode == 0) {
+    notice('The GitHub release ${plan.tag} already exists.');
+    return;
+  }
+
+  final notes = File(
+    p.join(Directory.systemTemp.path, 'release_notes_${plan.tag}.md'),
+  )..writeAsStringSync(releaseNotes(config, plan, root: root));
+  await run(
+    'gh',
+    [
+      'release',
+      'create',
+      plan.tag,
+      '--verify-tag',
+      '--title',
+      releaseTitle(plan.packages, plan.version),
+      '--notes-file',
+      notes.path,
+      if (isPreRelease(plan.version)) '--prerelease',
+    ],
+    workingDirectory: root,
+    credentialed: true,
+  );
+  addSummary('Created the GitHub release ${plan.tag}.');
 }

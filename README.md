@@ -11,8 +11,8 @@ and ordered, re-runnable pub.dev uploads, configured by one
 | Workflow | Runs on | Does |
 |---|---|---|
 | `release-pr.yml` | manual dispatch | Writes versions and changelogs, opens the release PR |
-| `release-tag.yml` | push to `main` | Tags new versions and creates GitHub releases |
-| `release-publish.yml` | tag push | Checks, tests, and publishes in dependency order |
+| `release-tag.yml` | push to `main` | Tags new versions, one push per tag |
+| `release-publish.yml` | tag push | Checks, tests, publishes in dependency order, then creates the GitHub release |
 
 The v1 workflows below stay available unchanged.
 

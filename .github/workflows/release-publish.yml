@@ -13,6 +13,8 @@ name: Publish release (v2)
 #   approve  waits for a reviewer when `approval_environment` is set.
 #   publish  for each package: skip if published, check hosted resolution,
 #            dry run, then upload with a short-lived OIDC credential.
+#   release  creates the GitHub release once pub.dev serves every package,
+#            so no announcement runs ahead of the upload.
 
 on:
   workflow_call:
@@ -37,6 +39,11 @@ on:
         required: false
         type: string
         default: ''
+      github_release:
+        description: Create a GitHub release after the upload.
+        required: false
+        type: boolean
+        default: true
       tool_ref:
         description: >-
           Ref of btwld/dart-actions for the release tool. Use the same ref as
@@ -197,4 +204,42 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           dart run .dart-actions/tool/bin/release.dart publish \
+            --root=src --config="$CONFIG" --tag="$TAG"
+
+  release:
+    name: Create the GitHub release
+    needs: publish
+    if: inputs.github_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+
+      - name: Check out the release tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: btwld/dart-actions
+          ref: ${{ inputs.tool_ref }}
+          path: .dart-actions
+          persist-credentials: false
+
+      - name: Set up the release tool
+        uses: ./.dart-actions/actions/setup-sdk
+        with:
+          sdk: dart
+
+      - name: Create the release after pub.dev serves the version
+        env:
+          CONFIG: ${{ inputs.config }}
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          dart run .dart-actions/tool/bin/release.dart release \
             --root=src --config="$CONFIG" --tag="$TAG"
