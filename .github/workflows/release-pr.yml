@@ -1,0 +1,161 @@
+name: Prepare release PR (v2)
+
+# Writes the next versions and changelog sections, then opens or updates one
+# release pull request. It never tags and never publishes: merging the PR lets
+# release-tag.yml create the tags.
+#
+# With the built-in versioner, each package's commits since its last tag
+# decide the bump (Conventional Commits: feat -> minor, fix/perf -> patch,
+# `!` or BREAKING CHANGE -> major; before 1.0.0 a breaking change bumps the
+# minor number). A prerelease stays on its line (beta.3 -> beta.4) unless
+# `version` says otherwise. Set `versioner: melos` in the configuration to
+# run `melos version` instead.
+#
+# Opening a PR needs a GitHub App token (`app_client_id` input and
+# `app_private_key` secret). Without one, the branch is pushed with GITHUB_TOKEN and
+# the job prints a link to open the PR by hand, because a PR opened with
+# GITHUB_TOKEN starts no CI.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Optional exact version. Empty lets the commits decide.
+        required: false
+        type: string
+        default: ''
+      packages:
+        description: Optional comma-separated package names for `version`.
+        required: false
+        type: string
+        default: ''
+      config:
+        description: Path of the release configuration in the caller repository.
+        required: false
+        type: string
+        default: .github/release.yaml
+      branch:
+        description: Branch that holds the release PR.
+        required: false
+        type: string
+        default: release/next
+      tool_ref:
+        description: Ref of btwld/dart-actions for the release tool.
+        required: false
+        type: string
+        default: v2
+      app_client_id:
+        description: >-
+          Client ID of the GitHub App that opens the PR. It is not a
+          secret; an organization variable such as RELEASE_APP_CLIENT_ID works.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      app_private_key:
+        description: Private key of that GitHub App.
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: release-pr-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare the release PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      APP_CLIENT_ID: ${{ inputs.app_client_id }}
+    steps:
+      - name: Create a GitHub App token
+        id: app
+        if: env.APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ inputs.app_client_id }}
+          private-key: ${{ secrets.app_private_key }}
+
+      # Full history and tags: each package's last tag starts its changelog.
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token || github.token }}
+
+      - name: Check out the release tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: btwld/dart-actions
+          ref: ${{ inputs.tool_ref }}
+          path: .dart-actions
+          persist-credentials: false
+
+      - name: Set up the release tool
+        uses: ./.dart-actions/actions/setup-sdk
+        with:
+          sdk: dart
+
+      - name: Read the SDK settings
+        id: settings
+        env:
+          CONFIG: ${{ inputs.config }}
+        run: dart run .dart-actions/tool/bin/release.dart check --root=src --config="$CONFIG"
+
+      - name: Set up Flutter
+        if: steps.settings.outputs.sdk == 'flutter'
+        uses: ./.dart-actions/actions/setup-sdk
+        with:
+          sdk: flutter
+          flutter-version: ${{ steps.settings.outputs.flutter_version }}
+          flutter-version-file: ${{ steps.settings.outputs.flutter_version_file != '' && format('src/{0}', steps.settings.outputs.flutter_version_file) || '' }}
+
+      - name: Write versions and changelogs
+        id: prepare
+        env:
+          CONFIG: ${{ inputs.config }}
+          VERSION: ${{ inputs.version }}
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          set -euo pipefail
+          args=(prepare --root=src --config="$CONFIG" --summary="$RUNNER_TEMP/release_pr_body.md")
+          if [ -n "$VERSION" ]; then args+=(--version="$VERSION"); fi
+          if [ -n "$PACKAGES" ]; then args+=(--packages="$PACKAGES"); fi
+          dart run .dart-actions/tool/bin/release.dart "${args[@]}"
+
+      - name: Push the release branch and open the PR
+        if: steps.prepare.outputs.changed == 'true'
+        working-directory: src
+        env:
+          BRANCH: ${{ inputs.branch }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          HAS_APP: ${{ steps.app.outputs.token != '' }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C "$BRANCH"
+          # Generated lock and override files are not part of the release.
+          git add -- '*pubspec.yaml' '*CHANGELOG.md'
+          git commit --message "$TITLE"
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+
+          existing="$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$TITLE" --body-file "$RUNNER_TEMP/release_pr_body.md"
+            echo "Updated release PR #$existing." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$HAS_APP" = true ]; then
+            gh pr create --head "$BRANCH" --base "$BASE" --title "$TITLE" --body-file "$RUNNER_TEMP/release_pr_body.md"
+          else
+            link="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$BASE...$BRANCH?expand=1"
+            echo "::notice::No GitHub App token is set. Open the release PR here: $link"
+            echo "Open the release PR: $link" >> "$GITHUB_STEP_SUMMARY"
+          fi

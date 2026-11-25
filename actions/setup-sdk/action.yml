@@ -1,0 +1,70 @@
+name: Set up the release SDK
+description: >-
+  Installs Flutter or Dart for the v2 release workflows, makes sure no pub.dev
+  credential is registered, and resolves the release tool. The release
+  workflows check out btwld/dart-actions next to the caller repository and use
+  this action from that checkout, so the tool and the workflow always come
+  from the same ref.
+
+inputs:
+  sdk:
+    description: '`flutter` or `dart`.'
+    required: true
+  flutter-version:
+    description: An exact Flutter version, or `stable`.
+    required: false
+    default: stable
+  flutter-version-file:
+    description: A file such as `src/.fvmrc` that pins Flutter. Wins over `flutter-version`.
+    required: false
+    default: ''
+  tool-path:
+    description: Path of the release tool package.
+    required: false
+    default: .dart-actions/tool
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Flutter
+      if: inputs.sdk == 'flutter' && inputs.flutter-version-file != ''
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        flutter-version-file: ${{ inputs.flutter-version-file }}
+        cache: true
+
+    - name: Set up Flutter
+      if: inputs.sdk == 'flutter' && inputs.flutter-version-file == '' && inputs.flutter-version == 'stable'
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        channel: stable
+        cache: true
+
+    - name: Set up Flutter
+      if: inputs.sdk == 'flutter' && inputs.flutter-version-file == '' && inputs.flutter-version != 'stable'
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        flutter-version: ${{ inputs.flutter-version }}
+        cache: true
+
+    # setup-dart registers a pub.dev credential whenever the job may request
+    # an OIDC token. The release tool requests its own short-lived credential
+    # right before each upload, so the one registered here is removed below.
+    - name: Set up Dart
+      if: inputs.sdk == 'dart'
+      uses: dart-lang/setup-dart@2286a0c042b44434fe26d292bbce8d34f7ec662b # v1.8.2
+      with:
+        sdk: stable
+
+    - name: Remove any registered pub.dev credential
+      shell: bash
+      run: dart pub token remove https://pub.dev || true
+
+    - name: Resolve the release tool
+      shell: bash
+      env:
+        TOOL_PATH: ${{ inputs.tool-path }}
+      run: |
+        set -euo pipefail
+        dart --version
+        dart pub get --directory "$TOOL_PATH"
